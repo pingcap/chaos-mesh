@@ -63,6 +63,13 @@ func (r *Reconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 	chaos := _chaos.(v1alpha1.InnerSchedulerObject)
 
+	// disable pause and remove auto resume at time to resume
+	autoResume := chaos.GetAutoResume()
+	if !autoResume.IsZero() && autoResume.Before(now) {
+		chaos.RecoverPause()
+		chaos.SetAutoResume(time.Time{})
+	}
+
 	status := chaos.GetStatus()
 
 	targetPhase := status.Experiment.Phase
@@ -77,6 +84,16 @@ func (r *Reconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	if chaos.IsPaused() {
 		targetPhase = v1alpha1.ExperimentPhasePaused
+		// pause for certain duration, only set autoResume once
+		if chaos.GetPause() != "" && status.Experiment.Phase != v1alpha1.ExperimentPhasePaused {
+			pauseTime, err := time.ParseDuration(chaos.GetPause())
+			if err != nil {
+				r.Log.Error(err, "failed to parse pause duration")
+				return ctrl.Result{}, err
+			}
+			resumeTime := now.Add(pauseTime)
+			chaos.SetAutoResume(resumeTime)
+		}
 	}
 
 	// TODO: find a better way to solve the pause and resume problem.
@@ -103,10 +120,20 @@ func (r *Reconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	// the reconciliation of Finished and Paused resource shouldn't be triggered by time
-	if chaos.GetStatus().Experiment.Phase == v1alpha1.ExperimentPhaseFinished ||
-		chaos.GetStatus().Experiment.Phase == v1alpha1.ExperimentPhasePaused {
+	// the reconciliation of Finished resource shouldn't be triggered by time
+	if chaos.GetStatus().Experiment.Phase == v1alpha1.ExperimentPhaseFinished {
 		return ctrl.Result{}, nil
+	}
+
+	if chaos.GetStatus().Experiment.Phase == v1alpha1.ExperimentPhasePaused {
+		autoResume = chaos.GetAutoResume()
+		if autoResume.IsZero() {
+			return ctrl.Result{}, nil
+		}
+		// pause for duration
+		r.Log.Info("Requeue unpause request", "after", autoResume.Sub(now))
+		return ctrl.Result{RequeueAfter: autoResume.Sub(now)}, nil
+
 	}
 
 	requeueAfter, err := calcRequeueAfterTime(chaos, now)

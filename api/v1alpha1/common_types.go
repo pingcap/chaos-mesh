@@ -24,6 +24,8 @@ import (
 const (
 	// PauseAnnotationKey defines the annotation used to pause a chaos
 	PauseAnnotationKey = "experiment.chaos-mesh.org/pause"
+	// PauseDurationAnnotationKey defines the annotation used to pause a chaos for certain duration
+	PauseDurationAnnotationKey = "experiment.chaos-mesh.org/pauseDuration"
 )
 
 // LabelSelectorRequirements is list of LabelSelectorRequirement
@@ -174,6 +176,10 @@ type ScheduleStatus struct {
 	// Next time when this action will be recovered
 	// +optional
 	NextRecover *metav1.Time `json:"nextRecover,omitempty"`
+
+	// Time when this action will be auto resumed
+	// +optional
+	AutoResume *metav1.Time `json:"autoResume,omitempty"`
 }
 
 // ExperimentPhase is the current status of chaos experiment.
@@ -218,6 +224,9 @@ type InnerSchedulerObject interface {
 	GetNextRecover() time.Time
 	SetNextRecover(time.Time)
 
+	GetAutoResume() time.Time
+	SetAutoResume(time.Time)
+
 	GetScheduler() *SchedulerSpec
 }
 
@@ -227,6 +236,8 @@ type InnerSchedulerObject interface {
 type InnerObject interface {
 	IsDeleted() bool
 	IsPaused() bool
+	GetPause() string
+	RecoverPause()
 	GetChaos() *ChaosInstance
 	StatefulObject
 }

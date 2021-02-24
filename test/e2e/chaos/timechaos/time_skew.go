@@ -19,11 +19,9 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
-	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/chaos-mesh/chaos-mesh/api/v1alpha1"
@@ -48,36 +46,12 @@ func TestcaseTimeSkewOnceThenRecover(
 	initTime, err := getPodTimeNS(c, port)
 	framework.ExpectNoError(err, "failed to get pod time")
 
-	timeChaos := &v1alpha1.TimeChaos{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "timer-time-chaos",
-			Namespace: ns,
-		},
-		Spec: v1alpha1.TimeChaosSpec{
-			Selector: v1alpha1.SelectorSpec{
-				Namespaces:     []string{ns},
-				LabelSelectors: map[string]string{"app": "timer"},
-			},
-			Mode:       v1alpha1.OnePodMode,
-			Duration:   pointer.StringPtr("9m"),
-			TimeOffset: "-1h",
-			Scheduler: &v1alpha1.SchedulerSpec{
-				Cron: "@every 10m",
-			},
-		},
-	}
+	timeChaos := createTimeChaos(ns, "9m", "@every 10m")
 	err = cli.Create(ctx, timeChaos)
 	framework.ExpectNoError(err, "create time chaos error")
 
 	By("waiting for assertion")
-	err = wait.PollImmediate(5*time.Second, 5*time.Minute, func() (done bool, err error) {
-		podTime, err := getPodTimeNS(c, port)
-		framework.ExpectNoError(err, "failed to get pod time")
-		if podTime.Before(*initTime) {
-			return true, nil
-		}
-		return false, nil
-	})
+	err = waitChaosWorking(initTime, c, port)
 	framework.ExpectNoError(err, "time chaos doesn't work as expected")
 
 	By("delete chaos CRD objects")
@@ -117,36 +91,12 @@ func TestcaseTimeSkewPauseThenUnpause(
 	framework.ExpectNoError(err, "failed to get pod time")
 
 	By("create chaos CRD objects")
-	timeChaos := &v1alpha1.TimeChaos{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "timer-time-chaos",
-			Namespace: ns,
-		},
-		Spec: v1alpha1.TimeChaosSpec{
-			Selector: v1alpha1.SelectorSpec{
-				Namespaces:     []string{ns},
-				LabelSelectors: map[string]string{"app": "timer"},
-			},
-			Mode:       v1alpha1.OnePodMode,
-			Duration:   pointer.StringPtr("9m"),
-			TimeOffset: "-1h",
-			Scheduler: &v1alpha1.SchedulerSpec{
-				Cron: "@every 10m",
-			},
-		},
-	}
+	timeChaos := createTimeChaos(ns, "9m", "@every 10m")
 	err = cli.Create(ctx, timeChaos)
 	framework.ExpectNoError(err, "create time chaos error")
 
 	By("waiting for assertion")
-	err = wait.PollImmediate(5*time.Second, 5*time.Minute, func() (done bool, err error) {
-		podTime, err := getPodTimeNS(c, port)
-		framework.ExpectNoError(err, "failed to get pod time")
-		if podTime.Before(*initTime) {
-			return true, nil
-		}
-		return false, nil
-	})
+	err = waitChaosWorking(initTime, c, port)
 	framework.ExpectNoError(err, "time chaos doesn't work as expected")
 
 	chaosKey := types.NamespacedName{
@@ -160,27 +110,11 @@ func TestcaseTimeSkewPauseThenUnpause(
 	framework.ExpectNoError(err, "pause chaos error")
 
 	By("assert pause is effective")
-	err = wait.Poll(5*time.Second, 5*time.Minute, func() (done bool, err error) {
-		chaos := &v1alpha1.TimeChaos{}
-		err = cli.Get(ctx, chaosKey, chaos)
-		framework.ExpectNoError(err, "get time chaos error")
-		if chaos.Status.Experiment.Phase == v1alpha1.ExperimentPhasePaused {
-			return true, nil
-		}
-		return false, err
-	})
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhasePaused, chaosKey, initTime, cli)
 	framework.ExpectNoError(err, "check paused chaos failed")
 
 	// wait for 1 minutes and check timer
-	framework.ExpectNoError(err, "get timer pod error")
-	err = wait.Poll(5*time.Second, 1*time.Minute, func() (done bool, err error) {
-		podTime, err := getPodTimeNS(c, port)
-		framework.ExpectNoError(err, "failed to get pod time")
-		if podTime.Before(*initTime) {
-			return true, nil
-		}
-		return false, nil
-	})
+	err = waitChaosWorking(initTime, c, port)
 	framework.ExpectError(err, "wait time chaos paused error")
 	framework.ExpectEqual(err.Error(), wait.ErrWaitTimeout.Error())
 
@@ -189,28 +123,145 @@ func TestcaseTimeSkewPauseThenUnpause(
 	framework.ExpectNoError(err, "resume chaos error")
 
 	By("assert chaos experiment resumed")
-	err = wait.Poll(5*time.Second, 5*time.Minute, func() (done bool, err error) {
-		chaos := &v1alpha1.TimeChaos{}
-		err = cli.Get(ctx, chaosKey, chaos)
-		framework.ExpectNoError(err, "get time chaos error")
-		if chaos.Status.Experiment.Phase == v1alpha1.ExperimentPhaseRunning {
-			return true, nil
-		}
-		return false, err
-	})
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhaseRunning, chaosKey, initTime, cli)
 	framework.ExpectNoError(err, "check resumed chaos failed")
 
 	// timechaos is running again, we want to check pod
 	// whether time is earlier than init time,
-	err = wait.PollImmediate(5*time.Second, 1*time.Minute, func() (done bool, err error) {
-		podTime, err := getPodTimeNS(c, port)
-		framework.ExpectNoError(err, "failed to get pod time")
-		if podTime.Before(*initTime) {
-			return true, nil
-		}
-		return false, nil
-	})
+	err = waitChaosWorking(initTime, c, port)
 	framework.ExpectNoError(err, "time chaos failed")
+
+	By("delete chaos CRD objects")
+	cli.Delete(ctx, timeChaos)
+}
+
+func TestcaseTimeSkewPauseThenAutoResumeAtRunning(
+	ns string,
+	cli client.Client,
+	c http.Client,
+	port uint16,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	By("wait e2e helper ready")
+	err := util.WaitE2EHelperReady(c, port)
+	framework.ExpectNoError(err, "wait e2e helper ready error")
+
+	initTime, err := getPodTimeNS(c, port)
+	framework.ExpectNoError(err, "failed to get pod time")
+
+	By("create chaos CRD objects")
+	timeChaos := createTimeChaos(ns, "9m", "@every 10m")
+	err = cli.Create(ctx, timeChaos)
+	framework.ExpectNoError(err, "create time chaos error")
+
+	By("waiting for assertion")
+	err = waitChaosWorking(initTime, c, port)
+	framework.ExpectNoError(err, "time chaos doesn't work as expected")
+
+	chaosKey := types.NamespacedName{
+		Namespace: ns,
+		Name:      "timer-time-chaos",
+	}
+
+	By("pause time skew chaos experiment for 2min")
+	pauseTime := time.Now()
+	// pause experiment
+	err = util.PauseChaosForDuration(ctx, cli, timeChaos, "2m")
+	framework.ExpectNoError(err, "pause chaos error")
+
+	By("assert pause is effective")
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhasePaused, chaosKey, initTime, cli)
+	framework.ExpectNoError(err, "check paused chaos failed")
+
+	// wait for 1 minute and check timer
+	err = waitChaosWorking(initTime, c, port)
+	framework.ExpectError(err, "wait time chaos paused error")
+	framework.ExpectEqual(err.Error(), wait.ErrWaitTimeout.Error())
+
+	By("assert chaos experiment resumed")
+	time.Sleep(2*time.Minute - time.Now().Sub(pauseTime))
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhaseRunning, chaosKey, initTime, cli)
+	framework.ExpectNoError(err, "check resumed chaos failed")
+
+	// timechaos is running again, we want to check pod
+	// whether time is earlier than init time,
+	err = waitChaosWorking(initTime, c, port)
+	framework.ExpectNoError(err, "time chaos failed")
+
+	By("delete chaos CRD objects")
+	cli.Delete(ctx, timeChaos)
+}
+
+func TestcaseTimeSkewPauseThenAutoResumeAtWaiting(
+	ns string,
+	cli client.Client,
+	c http.Client,
+	port uint16,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	By("wait e2e helper ready")
+	err := util.WaitE2EHelperReady(c, port)
+	framework.ExpectNoError(err, "wait e2e helper ready error")
+
+	initTime, err := getPodTimeNS(c, port)
+	framework.ExpectNoError(err, "failed to get pod time")
+
+	By("create chaos CRD objects")
+	timeChaos := createTimeChaos(ns, "2m", "@every 4m")
+	err = cli.Create(ctx, timeChaos)
+	framework.ExpectNoError(err, "create time chaos error")
+	createTime := time.Now()
+
+	By("waiting for assertion")
+	err = waitChaosWorking(initTime, c, port)
+	framework.ExpectNoError(err, "time chaos doesn't work as expected")
+
+	chaosKey := types.NamespacedName{
+		Namespace: ns,
+		Name:      "timer-time-chaos",
+	}
+
+	By("pause time skew chaos experiment for 2min")
+	// sleep till pause at the first minute in cron cycle
+	var sleepTime time.Duration
+	// to make sure resume at waiting state
+	if time.Now().Sub(createTime) < time.Minute {
+		sleepTime = 0
+	} else {
+		sleepTime = 4*time.Minute - time.Now().Sub(createTime)
+	}
+	time.Sleep(sleepTime)
+	// pause experiment
+	err = util.PauseChaosForDuration(ctx, cli, timeChaos, "2m")
+	framework.ExpectNoError(err, "pause chaos error")
+
+	By("assert pause is effective")
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhasePaused, chaosKey, initTime, cli)
+	framework.ExpectNoError(err, "check paused chaos failed")
+	pauseTime := time.Now()
+
+	// wait for 1 minute and check timer
+	err = waitChaosWorking(initTime, c, port)
+	framework.ExpectError(err, "wait time chaos paused error")
+	framework.ExpectEqual(err.Error(), wait.ErrWaitTimeout.Error())
+
+	By("assert pause stop and still in waiting state")
+	time.Sleep(2*time.Minute - time.Now().Sub(pauseTime))
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhaseWaiting, chaosKey, initTime, cli)
+	framework.ExpectNoError(err, "check paused chaos failed")
+
+	By("assert chaos experiment resumed")
+	time.Sleep(4*time.Minute - time.Now().Sub(createTime))
+	err = waitChaosStatus(ctx, v1alpha1.ExperimentPhaseRunning, chaosKey, initTime, cli)
+	framework.ExpectNoError(err, "check resumed chaos failed")
+
+	// timechaos is running again, we want to check pod
+	// whether time is earlier than init time,
+	err = waitChaosWorking(initTime, c, port)
 
 	By("delete chaos CRD objects")
 	cli.Delete(ctx, timeChaos)

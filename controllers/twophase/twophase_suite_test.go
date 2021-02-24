@@ -117,6 +117,15 @@ func (in *fakeTwoPhaseChaos) IsPaused() bool {
 	return false
 }
 
+// GetPause returns the annotation when the chaos needs to be paused
+func (in *fakeTwoPhaseChaos) GetPause() string {
+	return ""
+}
+
+// RecoverPause set the pausetime to empty, to stop pause
+func (in *fakeTwoPhaseChaos) RecoverPause() {
+}
+
 func (r fakeEndpoint) Object() v1alpha1.InnerObject {
 	return &fakeTwoPhaseChaos{}
 }
@@ -168,6 +177,14 @@ func (in *fakeTwoPhaseChaos) SetNextRecover(t time.Time) {
 		in.NextRecover = &metav1.Time{}
 	}
 	in.NextRecover.Time = t
+}
+
+func (in *fakeTwoPhaseChaos) GetAutoResume() time.Time {
+	return time.Time{}
+}
+
+func (in *fakeTwoPhaseChaos) SetAutoResume(t time.Time) {
+	return
 }
 
 func (in *fakeTwoPhaseChaos) GetScheduler() *v1alpha1.SchedulerSpec {

@@ -51,13 +51,21 @@ func Test{{.Type}}IsDeleted(t *testing.T) {
 
 func Test{{.Type}}IsIsPaused(t *testing.T) {
 	g := NewGomegaWithT(t)
+	chaos := &{{.Type}}{}
+	err := faker.FakeData(chaos)
+	g.Expect(err).To(BeNil())
+	chaos.IsPaused()
+}
+
+func Test{{.Type}}GetPause(t *testing.T) {
+	g := NewGomegaWithT(t)
 
 	chaos := &{{.Type}}{}
 	err := faker.FakeData(chaos)
 
 	g.Expect(err).To(BeNil())
 
-	chaos.IsPaused()
+	chaos.GetPause()
 }
 
 func Test{{.Type}}GetDuration(t *testing.T) {
