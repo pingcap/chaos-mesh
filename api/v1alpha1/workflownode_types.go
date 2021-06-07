@@ -24,6 +24,11 @@ const (
 	LabelWorkflow     = "chaos-mesh.org/workflow"
 )
 
+const (
+	LabelControlledBy = "chaos-mesh.org/controlled-by"
+	LabelWorkflow     = "chaos-mesh.org/workflow"
+)
+
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:shortName=wfn
 // +kubebuilder:subresource:status

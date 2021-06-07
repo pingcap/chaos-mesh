@@ -41,6 +41,10 @@ spec:
               - ec2-restart
               - detach-volume
               type: string
+            attackConfiguration:
+              description: AttackConfiguration indicates the name of the attack. Needed
+                in attack-configuration.
+              type: string
             awsRegion:
               description: AwsRegion defines the region of aws.
               type: string
@@ -7729,6 +7733,10 @@ spec:
                   - ec2-restart
                   - detach-volume
                   type: string
+                attackConfiguration:
+                  description: AttackConfiguration indicates the name of the attack.
+                    Needed in attack-configuration.
+                  type: string
                 awsRegion:
                   description: AwsRegion defines the region of aws.
                   type: string
@@ -9788,6 +9796,10 @@ spec:
                         - ec2-stop
                         - ec2-restart
                         - detach-volume
+                        type: string
+                      attackConfiguration:
+                        description: AttackConfiguration indicates the name of the
+                          attack. Needed in attack-configuration.
                         type: string
                       awsRegion:
                         description: AwsRegion defines the region of aws.
