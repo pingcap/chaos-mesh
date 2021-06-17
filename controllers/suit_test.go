@@ -11,54 +11,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package desiredphase
+package controllers
 
 import (
-	"context"
+	"bytes"
+	"encoding/gob"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"go.uber.org/fx"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/chaos-mesh/chaos-mesh/api/v1alpha1"
 	"github.com/chaos-mesh/chaos-mesh/controllers/schedule/utils"
-	"github.com/chaos-mesh/chaos-mesh/controllers/types"
-	"github.com/chaos-mesh/chaos-mesh/controllers/utils/test"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var app *fx.App
 var k8sClient client.Client
 var lister *utils.ActiveLister
 var config *rest.Config
 var testEnv *envtest.Environment
 var setupLog = ctrl.Log.WithName("setup")
 
-func TestDesiredPhase(t *testing.T) {
+func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 
 	RunSpecsWithDefaultAndCustomReporters(t,
-		"Desired Phase suit",
-		[]Reporter{printer.NewlineReporter{}})
+		"controller test suit",
+		[]Reporter{})
 }
 
-var _ = BeforeSuite(func() {
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-	By("bootstrapping test environment")
+var _ = SynchronizedBeforeSuite(func() []byte {
 	t := true
 	if os.Getenv("TEST_USE_EXISTING_CLUSTER") == "true" {
 		testEnv = &envtest.Environment{
@@ -66,68 +59,40 @@ var _ = BeforeSuite(func() {
 		}
 	} else {
 		testEnv = &envtest.Environment{
-			CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
+			CRDDirectoryPaths: []string{filepath.Join("..", "config", "crd", "bases")},
 		}
 	}
 
-	err := v1alpha1.SchemeBuilder.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	config, err = testEnv.Start()
+	config, err := testEnv.Start()
 	Expect(err).ToNot(HaveOccurred())
 	Expect(config).ToNot(BeNil())
+
+	var data bytes.Buffer
+	enc := gob.NewEncoder(&data)
+	enc.Encode(config)
+	Expect(err).ToNot(HaveOccurred())
+
+	return data.Bytes()
+}, func(confBytes []byte) {
+	data := bytes.NewBuffer(confBytes)
+	dec := gob.NewDecoder(data)
+	var gotConfig rest.Config
+	err := dec.Decode(&gotConfig)
+	Expect(err).ToNot(HaveOccurred())
+	config = &gotConfig
+	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	By("bootstrapping test environment")
+
+	err = v1alpha1.SchemeBuilder.AddToScheme(scheme.Scheme)
+	Expect(err).ToNot(HaveOccurred())
 
 	k8sClient, err = client.New(config, client.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(k8sClient).ToNot(BeNil())
-
-	app = fx.New(
-		fx.Options(
-			test.Module,
-			fx.Provide(
-				fx.Annotated{
-					Group:  "controller",
-					Target: NewController,
-				},
-			),
-			fx.Supply(config),
-			types.ChaosObjects,
-		),
-		fx.Invoke(Run),
-	)
-	startCtx, cancel := context.WithTimeout(context.Background(), app.StartTimeout())
-	defer cancel()
-
-	if err := app.Start(startCtx); err != nil {
-		setupLog.Error(err, "fail to start manager")
-	}
-	Expect(err).ToNot(HaveOccurred())
-
 }, 60)
 
-var _ = AfterSuite(func() {
+var _ = SynchronizedAfterSuite(func() {}, func() {
 	By("tearing down the test environment")
-	stopCtx, cancel := context.WithTimeout(context.Background(), app.StopTimeout())
-	defer cancel()
-
-	if err := app.Stop(stopCtx); err != nil {
-		setupLog.Error(err, "fail to stop manager")
-	}
 	err := testEnv.Stop()
 	Expect(err).ToNot(HaveOccurred())
-})
-
-type RunParams struct {
-	fx.In
-
-	Mgr    ctrl.Manager
-	Logger logr.Logger
-
-	Controllers []types.Controller `group:"controller"`
-	Objs        []types.Object     `group:"objs"`
-}
-
-func Run(params RunParams) error {
-	lister = utils.NewActiveLister(k8sClient, params.Logger)
-	return nil
-}
+}, 60)
