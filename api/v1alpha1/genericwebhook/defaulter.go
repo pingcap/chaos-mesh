@@ -11,20 +11,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package v1alpha1
+package genericwebhook
 
 import (
-	gw "github.com/chaos-mesh/chaos-mesh/api/v1alpha1/genericwebhook"
+	"reflect"
+
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
-type ScheduleItem struct {
-	EmbedChaos `json:",inline"`
-	// +optional
-	Workflow *WorkflowSpec `json:"workflow,omitempty"`
+type Defaulter interface {
+	Default(root interface{}, field reflect.StructField)
 }
 
-func (in EmbedChaos) Validate(chaosType string) field.ErrorList {
-	gw.Default(&in)
-	return gw.Validate(&in)
+func Default(obj interface{}) {
+	root := obj
+	walker := NewFieldWalker(obj, func(path *field.Path, obj interface{}, field reflect.StructField) bool {
+		if defaulter, ok := obj.(Defaulter); ok {
+			defaulter.Default(root, field)
+
+			return true
+		}
+
+		return true
+	})
+	walker.Walk()
 }
